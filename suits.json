@@ -1,0 +1,10 @@
+[
+  {"name": "skulls", "path": "icons/skull.png", "color": [255, 255, 255]},
+  {"name": "bananas", "path": "icons/banana.png", "color": [255, 255, 0]},
+  {"name": "money", "path": "icons/money.png", "color": [0, 179, 0]},
+  {"name": "crowns", "path": "icons/crown.png", "color": [255, 180, 0]},
+  {"name": "hearts", "path": "icons/heart.png", "color": [255, 128, 128]},
+  {"name": "diamonds", "path": "icons/diamond.png", "color": [100, 149, 237]},
+  {"name": "clubs", "path": "icons/club.png", "color": [180, 120, 230]},
+  {"name": "spades", "path": "icons/spade.png", "color": [192, 192, 192]}
+]
