@@ -110,23 +110,34 @@ def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str, font_p
         else:
             label = 'K'
 
-        # measure label
-        bbox = draw.textbbox((0,0), label, font=font)
+        # measure label (rough size for temp buffers)
+        bbox = draw.textbbox((0, 0), label, font=font)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
 
+        inner_l = x0 + PADDING
+        inner_t = y0 + PADDING
+        inner_r = x0 + CARD_WIDTH - PADDING
+        inner_b = y0 + CARD_HEIGHT - PADDING
+
+        corner_pad = max(text_w, text_h) // 4
+        tw = text_w + corner_pad + 8
+        th = text_h + corner_pad + 8
+
         # --- TOP-LEFT corner ---
-        tx = x0 + PADDING
-        ty = y0 + PADDING
-        draw.text((tx, ty), label, font=font, fill=color)
-        sheet.paste(icon2, (tx, ty + text_h + GAP), icon2)
+        # Match bottom-right: textbbox leaves slack; render with anchor + getbbox() tight crop
+        # so ink sits flush to inner_l / inner_t (same nuzzled feel as BR).
+        _tmp_tl = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+        _td_tl = ImageDraw.Draw(_tmp_tl)
+        _td_tl.text((corner_pad, corner_pad), label, font=font, fill=color, anchor="lt")
+        _gb_tl = _tmp_tl.getbbox()
+        if not _gb_tl:
+            _gb_tl = (0, 0, tw, th)
+        tight_tl = _tmp_tl.crop(_gb_tl)
+        sheet.paste(tight_tl, (inner_l, inner_t), tight_tl)
+        sheet.paste(icon2, (inner_l, inner_t + tight_tl.height + GAP), icon2)
 
         # --- BOTTOM-RIGHT corner (rotated) ---
-        # textbbox is wider than visible pixels for some fonts; use getbbox() tight crop so the
-        # glyph's right edge matches the bitmap edge (same idea as top-left flush to inner_r).
-        padding = max(text_w, text_h) // 4
-        tw = text_w + padding + 8
-        th = text_h + padding + 8
         _tmp = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
         _td = ImageDraw.Draw(_tmp)
         _td.text((tw, th), label, font=font, fill=color, anchor="rb")
@@ -134,10 +145,10 @@ def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str, font_p
         if not _gb:
             _gb = (0, 0, tw, th)
         _tight = _tmp.crop(_gb)
-        lbl_w = padding + _tight.width
-        lbl_h = padding + _tight.height
+        lbl_w = corner_pad + _tight.width
+        lbl_h = corner_pad + _tight.height
         lbl_img = Image.new("RGBA", (lbl_w, lbl_h), (0, 0, 0, 0))
-        lbl_img.paste(_tight, (padding, padding))
+        lbl_img.paste(_tight, (corner_pad, corner_pad))
 
         rot_lbl = lbl_img.rotate(180, expand=False)
         # rotate(180) leaves transparent slack on the sheet-ward sides of the fixed canvas;
@@ -146,8 +157,6 @@ def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str, font_p
         if _rb:
             rot_lbl = rot_lbl.crop(_rb)
 
-        inner_r = x0 + CARD_WIDTH - PADDING
-        inner_b = y0 + CARD_HEIGHT - PADDING
         bx = inner_r - rot_lbl.width
         by = inner_b - rot_lbl.height
 
@@ -220,7 +229,7 @@ if __name__ == "__main__":
                 icon_path=path,
                 color=col,
                 output_path=str(SHEETS_DIR / f"{name}_sheet.png"),
-                font_path="m6x11plus.ttf",
+                font_path="m5x7.ttf",
             )
     else:
         export_colored_icons()
@@ -230,5 +239,5 @@ if __name__ == "__main__":
                 icon_path=path,
                 color=col,
                 output_path=str(SHEETS_DIR / f"{name}_sheet.png"),
-                font_path="m6x11plus.ttf",
+                font_path="m5x7.ttf",
             )
