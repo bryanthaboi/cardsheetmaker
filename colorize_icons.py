@@ -15,6 +15,24 @@ def colorize_icon(img: Image.Image, color: tuple) -> Image.Image:
     return colored
 
 
+def colorize_face(img: Image.Image, color: tuple) -> Image.Image:
+    """Tint white pixels to `color`, keep non-white pixels (e.g. red) as-is."""
+    img = img.convert("RGBA")
+    out = img.copy()
+    pixels = out.load()
+    cr, cg, cb = color
+    for y in range(out.height):
+        for x in range(out.width):
+            r, g, b, a = pixels[x, y]
+            if a == 0:
+                continue
+            # white pixels get the suit color
+            if r > 200 and g > 200 and b > 200:
+                pixels[x, y] = (cr, cg, cb, a)
+            # non-white (red accents etc.) stay untouched
+    return out
+
+
 def export_colored_icons(suits=None):
     """Write `output/suits/{name}_colored.png` per suit and optional face copies there."""
     ensure_suits_dir()
@@ -32,7 +50,7 @@ def export_colored_icons(suits=None):
 
     for face in ("jack", "queen", "king"):
         try:
-            icon = Image.open(f"icons/{face}.png").convert("RGBA")
+            icon = Image.open(f"newinput/{face}.png").convert("RGBA")
             output_path = SUITS_DIR / f"{face}_original.png"
             icon.save(output_path)
             print(f"✔️  Saved: {output_path}")

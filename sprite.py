@@ -1,8 +1,9 @@
 import argparse
+import os
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
-from colorize_icons import colorize_icon, export_colored_icons
+from colorize_icons import colorize_icon, colorize_face, export_colored_icons
 from output_paths import SHEETS_DIR, ensure_sheets_dir
 from suits_loader import load_suits
 
@@ -14,7 +15,8 @@ PADDING = 2                          # pixels around each cell
 GAP     = 10                          # pixels between number and icon
 ICON_SCALE = 0.12                    # max side of center pip (fraction of card width); aspect preserved
 ICON_SCALE_OTHER = 0.15            # max side of corner icons (fraction of card width); aspect preserved (~same budget as center pips)
-FONT_SCALE = 0.2                    # font size as fraction of card height
+LABEL_SCALE = 4                      # integer scale for corner label pixel art (nearest neighbour)
+LABEL_DIR = "newinput"               # directory containing label images and face cards
 # ------------------------------------------------------------
 
 # normalized pip positions (fractions of card width/height)
@@ -56,13 +58,18 @@ def _resize_nearest_max_side(img: Image.Image, max_side: int) -> Image.Image:
     return img.resize((nw, nh), Image.NEAREST)
 
 
-def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str, font_path: str = None):
-    cols = 13
+def _load_label(val: int) -> Image.Image:
+    """Load the corner label image for a card value (1–13)."""
+    path = os.path.join(LABEL_DIR, f"Layer {val}.png")
+    return Image.open(path).convert("RGBA")
+
+
+def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str):
+    cols = 13  # cards 1–K
     sheet_w = cols * CARD_WIDTH + (cols + 1) * PADDING
     sheet_h = CARD_HEIGHT + 2 * PADDING
 
     sheet = Image.new("RGBA", (sheet_w, sheet_h), (0,0,0,0))
-    draw  = ImageDraw.Draw(sheet)
 
     # load, resize (aspect-preserving), tint icons
     base_icon = Image.open(icon_path).convert("RGBA")
@@ -75,94 +82,49 @@ def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str, font_p
     icon_rot = icon.rotate(180, Image.NEAREST)
     icon_rot2 = icon2.rotate(180, Image.NEAREST)
     iw, ih = icon.size
-    
-    # Load face card icons
+
+    # Load face card icons from newinput/
     face_card_icons = {}
     face_card_size = 0.5  # 50% of card width
     for face in ['jack', 'queen', 'king']:
         try:
-            face_img = Image.open(f"icons/{face}.png").convert("RGBA")
+            face_img = Image.open(os.path.join(LABEL_DIR, f"{face}.png")).convert("RGBA")
             face_size = int(CARD_WIDTH * face_card_size)
             face_img = face_img.resize((face_size, int(face_size * face_img.height / face_img.width)), Image.NEAREST)
-            face_card_icons[face] = colorize_icon(face_img, color)
+            face_card_icons[face] = colorize_face(face_img, color)
         except FileNotFoundError:
-            print(f"Warning: Could not find {face}.png in icons folder")
+            print(f"Warning: Could not find {face}.png in {LABEL_DIR}")
 
-    # load font
-    if font_path:
-        fs = int(CARD_HEIGHT * FONT_SCALE)
-        font = ImageFont.truetype(font_path, fs)
-    else:
-        font = ImageFont.load_default()
+    # Pre-load and scale all corner label images
+    label_imgs = {}
+    for v in range(1, 14):
+        raw = _load_label(v)
+        w, h = raw.size
+        scaled = raw.resize((w * LABEL_SCALE, h * LABEL_SCALE), Image.NEAREST)
+        label_imgs[v] = colorize_icon(scaled, color)
 
     for i in range(cols):
         x0 = PADDING + i * (CARD_WIDTH + PADDING)
         y0 = PADDING
         val = i + 1
 
-        # corner label
-        if val <= 10:
-            label = str(val)
-        elif val == 11:
-            label = 'J'
-        elif val == 12:
-            label = 'Q'
-        else:
-            label = 'K'
-
-        # measure label (rough size for temp buffers)
-        bbox = draw.textbbox((0, 0), label, font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
+        lbl_img = label_imgs[val]
 
         inner_l = x0 + PADDING
         inner_t = y0 + PADDING
         inner_r = x0 + CARD_WIDTH - PADDING
         inner_b = y0 + CARD_HEIGHT - PADDING
 
-        corner_pad = max(text_w, text_h) // 4
-        tw = text_w + corner_pad + 8
-        th = text_h + corner_pad + 8
-
         # --- TOP-LEFT corner ---
-        # Match bottom-right: textbbox leaves slack; render with anchor + getbbox() tight crop
-        # so ink sits flush to inner_l / inner_t (same nuzzled feel as BR).
-        _tmp_tl = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-        _td_tl = ImageDraw.Draw(_tmp_tl)
-        _td_tl.text((corner_pad, corner_pad), label, font=font, fill=color, anchor="lt")
-        _gb_tl = _tmp_tl.getbbox()
-        if not _gb_tl:
-            _gb_tl = (0, 0, tw, th)
-        tight_tl = _tmp_tl.crop(_gb_tl)
-        sheet.paste(tight_tl, (inner_l, inner_t), tight_tl)
-        sheet.paste(icon2, (inner_l, inner_t + tight_tl.height + GAP), icon2)
+        sheet.paste(lbl_img, (inner_l, inner_t), lbl_img)
+        sheet.paste(icon2, (inner_l, inner_t + lbl_img.height + GAP), icon2)
 
-        # --- BOTTOM-RIGHT corner (rotated) ---
-        _tmp = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
-        _td = ImageDraw.Draw(_tmp)
-        _td.text((tw, th), label, font=font, fill=color, anchor="rb")
-        _gb = _tmp.getbbox()
-        if not _gb:
-            _gb = (0, 0, tw, th)
-        _tight = _tmp.crop(_gb)
-        lbl_w = corner_pad + _tight.width
-        lbl_h = corner_pad + _tight.height
-        lbl_img = Image.new("RGBA", (lbl_w, lbl_h), (0, 0, 0, 0))
-        lbl_img.paste(_tight, (corner_pad, corner_pad))
-
-        rot_lbl = lbl_img.rotate(180, expand=False)
-        # rotate(180) leaves transparent slack on the sheet-ward sides of the fixed canvas;
-        # crop so paste uses tight ink and the rank actually reaches inner_r / inner_b.
-        _rb = rot_lbl.getbbox()
-        if _rb:
-            rot_lbl = rot_lbl.crop(_rb)
-
+        # --- BOTTOM-RIGHT corner (rotated 180°) ---
+        rot_lbl = lbl_img.rotate(180, Image.NEAREST)
         bx = inner_r - rot_lbl.width
         by = inner_b - rot_lbl.height
-
         sheet.paste(rot_lbl, (bx, by), rot_lbl)
 
-        # Icon above rank, both flush to inner right (stays inside card cell)
         icon_y_offset = GAP + icon_rot2.height
         icon_x = inner_r - icon_rot2.width
         sheet.paste(icon_rot2, (icon_x, by - icon_y_offset), icon_rot2)
@@ -170,7 +132,6 @@ def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str, font_p
         # --- CENTER PIPS for 1–10 or FACE CARDS for J/Q/K ---
         if 1 <= val <= 10:
             spots = PIP_MAP[val]
-            # determine bottom half to flip
             sorted_spots = sorted(spots, key=lambda s: POS[s][1])
             flip_count = len(sorted_spots) // 2
             bottom_set = set(sorted_spots[-flip_count:])
@@ -180,22 +141,18 @@ def generate_sprite_sheet(icon_path: str, color: tuple, output_path: str, font_p
                 py = int(y0 + fy * CARD_HEIGHT - ih / 2)
                 use_icon = icon_rot if spot in bottom_set else icon
                 sheet.paste(use_icon, (px, py), use_icon)
-        # For face cards (J/Q/K), place the corresponding image in the center
         elif val == 11 and 'jack' in face_card_icons:
             face_img = face_card_icons['jack']
-            # Center the face card image
             fx = x0 + (CARD_WIDTH - face_img.width) // 2
             fy = y0 + (CARD_HEIGHT - face_img.height) // 2
             sheet.paste(face_img, (fx, fy), face_img)
         elif val == 12 and 'queen' in face_card_icons:
             face_img = face_card_icons['queen']
-            # Center the face card image
             fx = x0 + (CARD_WIDTH - face_img.width) // 2
             fy = y0 + (CARD_HEIGHT - face_img.height) // 2
             sheet.paste(face_img, (fx, fy), face_img)
         elif val == 13 and 'king' in face_card_icons:
             face_img = face_card_icons['king']
-            # Center the face card image
             fx = x0 + (CARD_WIDTH - face_img.width) // 2
             fy = y0 + (CARD_HEIGHT - face_img.height) // 2
             sheet.paste(face_img, (fx, fy), face_img)
@@ -229,7 +186,6 @@ if __name__ == "__main__":
                 icon_path=path,
                 color=col,
                 output_path=str(SHEETS_DIR / f"{name}_sheet.png"),
-                font_path="m5x7.ttf",
             )
     else:
         export_colored_icons()
@@ -239,5 +195,4 @@ if __name__ == "__main__":
                 icon_path=path,
                 color=col,
                 output_path=str(SHEETS_DIR / f"{name}_sheet.png"),
-                font_path="m5x7.ttf",
             )
